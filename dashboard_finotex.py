@@ -30,8 +30,9 @@ if st.session_state["authentication_status"]:
             if "antig" in c_low: df.rename(columns={col: "Antigüedad"}, inplace=True)
             if "mot" in c_low and "baja" in c_low: df.rename(columns={col: "MOT. BAJA"}, inplace=True)
             if "edad" in c_low: df.rename(columns={col: "Edad"}, inplace=True)
+            if "hijos" in c_low: df.rename(columns={col: "Hijos"}, inplace=True)
 
-        cols_to_fix = ["Sexo", "Edo. Civil", "Departamento", "Puesto", "Area", "MOT. BAJA"]
+        cols_to_fix = ["Sexo", "Edo. Civil", "Departamento", "Puesto", "Area", "MOT. BAJA", "Hijos"]
         for c in cols_to_fix:
             if c in df.columns:
                 df[c] = df[c].fillna("Sin Dato").astype(str).str.strip().replace(['', 'nan', 'None'], 'Sin Dato')
@@ -65,7 +66,7 @@ if st.session_state["authentication_status"]:
 
     if df_selection is not None:
         st.title("📊 Panel de Control de Recursos Humanos")
-        st.markdown("###") # ESPACIO ADICIONAL
+        st.markdown("###") 
         
         # KPIs
         t_emp, t_pay = len(df_selection), df_selection["Sueldo Mensual (bruto)"].sum()
@@ -77,46 +78,65 @@ if st.session_state["authentication_status"]:
         m3.metric("Edad Promedio", f"{avg_age:.1f} años")
         m4.metric("Sueldo Promedio", f"${(t_pay/t_emp) if t_emp > 0 else 0:,.2f}")
 
-        st.markdown("###")
         st.divider()
 
-        # FILA 1
+        # FILA 1: DISTRIBUCIÓN POR DEPARTAMENTO Y DEMOGRAFÍA (POR NÚMERO DE PERSONAS)
         c1, c2 = st.columns(2)
         with c1:
-            st.subheader("Sueldo por Departamento")
-            fig_sal = px.bar(df_selection.groupby("Departamento")["Sueldo Mensual (bruto)"].sum().reset_index(), 
-                            x="Departamento", y="Sueldo Mensual (bruto)", color="Departamento", template="plotly_white")
-            fig_sal.update_traces(hovertemplate="<b>%{x}</b><br>Sueldo: $%{y:,.2f}<extra></extra>") # LIMPIEZA LABELS
-            st.plotly_chart(fig_sal, use_container_width=True)
+            st.subheader("Empleados por Departamento")
+            # Agrupamos por departamento contando personas (headcount)
+            df_dept_count = df_selection.groupby("Departamento").size().reset_index(name='Conteo')
+            fig_dept_pie = px.pie(df_dept_count, names="Departamento", values="Conteo", hole=0.5,
+                                  template="plotly_white", labels={'Conteo': 'Personas'})
+            fig_dept_pie.update_traces(textinfo='value+percent', hovertemplate="<b>%{label}</b><br>Personas: %{value}<extra></extra>")
+            st.plotly_chart(fig_dept_pie, use_container_width=True)
 
         with c2:
-            st.subheader("Género y Estado Civil")
-            df_sun = df_selection.groupby(["Sexo", "Edo. Civil"], as_index=False)["Sueldo Mensual (bruto)"].sum()
-            fig_sun = px.sunburst(df_sun, path=["Sexo", "Edo. Civil"], values="Sueldo Mensual (bruto)")
-            fig_sun.update_traces(hovertemplate="<b>%{label}</b><br>Monto: $%{value:,.2f}<extra></extra>")
+            st.subheader("Demografía (Género y Edo. Civil)")
+            # Cambiamos values a conteo de filas para que el tamaño sea por personas
+            df_sun = df_selection.groupby(["Sexo", "Edo. Civil"]).size().reset_index(name='Personas')
+            fig_sun = px.sunburst(df_sun, path=["Sexo", "Edo. Civil"], values="Personas")
+            fig_sun.update_traces(hovertemplate="<b>%{label}</b><br>Total: %{value} personas<extra></extra>")
             st.plotly_chart(fig_sun, use_container_width=True)
 
-        st.markdown("###")
         st.divider()
 
-        # FILA 2 (SCATTER PLOT RECUPERADO)
+        # FILA 2: BAJAS Y NUEVO CHART DE HIJOS
         c3, c4 = st.columns(2)
         with c3:
-            st.subheader("Motivos de Baja")
+            st.subheader("Motivos de Baja (Total Personas)")
             df_bajas = df_selection[df_selection["MOT. BAJA"] != "Sin Dato"]
             if not df_bajas.empty:
-                fig_pie = px.pie(df_bajas, names="MOT. BAJA", hole=0.4, labels={'MOT. BAJA': 'Motivo'})
-                fig_pie.update_traces(textinfo='percent+label', hovertemplate="<b>%{label}</b>: %{value} casos<extra></extra>")
+                # Contamos ocurrencias por motivo
+                df_bajas_count = df_bajas.groupby("MOT. BAJA").size().reset_index(name='Total')
+                fig_pie = px.pie(df_bajas_count, names="MOT. BAJA", values="Total", hole=0.5, 
+                                 labels={'MOT. BAJA': 'Motivo'})
+                fig_pie.update_traces(textinfo='value+label', hovertemplate="<b>%{label}</b>: %{value} personas<extra></extra>")
                 st.plotly_chart(fig_pie, use_container_width=True)
+            else:
+                st.info("No hay datos de bajas registrados.")
 
         with c4:
-            st.subheader("Antigüedad vs Sueldo")
-            if "Antigüedad" in df_selection.columns:
-                fig_scat = px.scatter(df_selection, x="Antigüedad", y="Sueldo Mensual (bruto)", 
-                                     color="Area", size="Edad", hover_name="Nombre por apellido",
-                                     labels={"Sueldo Mensual (bruto)": "Sueldo", "Area": "Área"})
-                fig_scat.update_traces(hovertemplate="<b>%{hovertext}</b><br>Sueldo: $%{y:,.2f}<br>Años: %{x}<extra></extra>")
-                st.plotly_chart(fig_scat, use_container_width=True)
+            st.subheader("Distribución de Hijos por Departamento")
+            if "Hijos" in df_selection.columns:
+                # Gráfico de barras seccionado
+                fig_hijos = px.histogram(df_selection, x="Hijos", color="Departamento", 
+                                        barmode="group", template="plotly_white",
+                                        labels={"Hijos": "Número de Hijos", "count": "Cantidad de Empleados"})
+                st.plotly_chart(fig_hijos, use_container_width=True)
+            else:
+                st.warning("Columna 'Hijos' no encontrada.")
+
+        st.divider()
+
+        # FILA 3: ANTIGÜEDAD VS SUELDO
+        st.subheader("Relación Antigüedad vs Sueldo")
+        if "Antigüedad" in df_selection.columns:
+            fig_scat = px.scatter(df_selection, x="Antigüedad", y="Sueldo Mensual (bruto)", 
+                                 color="Area", size="Edad", hover_name="Nombre por apellido",
+                                 labels={"Sueldo Mensual (bruto)": "Sueldo", "Area": "Área"})
+            fig_scat.update_traces(hovertemplate="<b>%{hovertext}</b><br>Sueldo: $%{y:,.2f}<br>Años: %{x}<extra></extra>")
+            st.plotly_chart(fig_scat, use_container_width=True)
 
         with st.expander("🔍 Ver Base de Datos Detallada"):
             st.dataframe(df_selection, use_container_width=True)
