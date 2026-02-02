@@ -86,9 +86,8 @@ if st.session_state["authentication_status"]:
 
         st.markdown("###")
         st.divider()
-        st.markdown("###")
 
-        # FILA 1: DONA DE DEPTO Y SUNBURST DEMOGRÁFICO
+        # FILA 1: DONAS Y SUNBURST (TAMAÑO POR PERSONAS)
         c1, c2 = st.columns(2)
         with c1:
             st.subheader("Distribución por Departamento (Personas)")
@@ -100,10 +99,10 @@ if st.session_state["authentication_status"]:
             
             fig_dept = px.pie(df_dept_agg, names="Departamento", values="Personas", hole=0.5,
                              custom_data=["Sueldo_Total"], template="plotly_white")
-            # Limpiamos hover: Departamento arriba, sueldo abajo
+            # Hover limpio sin "Departamento="
             fig_dept.update_traces(
                 textinfo='value+percent', 
-                hovertemplate="<b>%{label}</b><br>Personas: %{value}<br>Nómina: $%{customdata[0]:,.2f}<extra></extra>"
+                hovertemplate="<b>%{label}</b><br>Personas: %{value}<br>Sueldo Total: $%{customdata[0]:,.2f}<extra></extra>"
             )
             st.plotly_chart(fig_dept, use_container_width=True)
 
@@ -111,4 +110,78 @@ if st.session_state["authentication_status"]:
             st.subheader("Demografía (Tamaño por Headcount)")
             # Tamaño por personas, incluyendo sueldo en hover
             df_sun_agg = df_selection.groupby(["Sexo", "Edo. Civil"]).agg(
-                Personas=("Suel
+                Personas=("Sueldo Mensual (bruto)", "count"),
+                Sueldo_Total=("Sueldo Mensual (bruto)", "sum")
+            ).reset_index()
+            
+            fig_sun = px.sunburst(df_sun_agg, path=["Sexo", "Edo. Civil"], values="Personas",
+                                 custom_data=["Sueldo_Total"],
+                                 color="Sexo", color_discrete_map={"MASCULINO": "#636EFA", "FEMENINO": "#EF553B"})
+            fig_sun.update_traces(hovertemplate="<b>%{label}</b><br>Personas: %{value}<br>Nómina: $%{customdata[0]:,.2f}<extra></extra>")
+            st.plotly_chart(fig_sun, use_container_width=True)
+
+        st.divider()
+
+        # FILA 2: BAJAS Y HIJOS
+        c3, c4 = st.columns(2)
+        with c3:
+            st.subheader("Motivos de Baja (Total Personas)")
+            df_bajas = df_selection[df_selection["MOT. BAJA"] != "Sin Dato"].copy()
+            if not df_bajas.empty:
+                df_bajas_agg = df_bajas.groupby("MOT. BAJA").agg(
+                    Total=("Sueldo Mensual (bruto)", "count"),
+                    Impacto_Nomina=("Sueldo Mensual (bruto)", "sum")
+                ).reset_index()
+                
+                fig_pie = px.pie(df_bajas_agg, names="MOT. BAJA", values="Total", hole=0.5, 
+                                 custom_data=["Impacto_Nomina"])
+                fig_pie.update_traces(
+                    textinfo='value+percent',
+                    hovertemplate="<b>Motivo: %{label}</b><br>Casos: %{value}<br>Costo Bajas: $%{customdata[0]:,.2f}<extra></extra>"
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
+            else:
+                st.info("No hay datos de bajas registrados.")
+
+        with c4:
+            st.subheader("Hijos por Departamento (Horizontal)")
+            if "Hijos" in df_selection.columns:
+                # Barra horizontal apilada para legibilidad
+                fig_hijos = px.histogram(
+                    df_selection, y="Departamento", color="Hijos", 
+                    barmode="stack", orientation="h", template="plotly_white"
+                )
+                # Limpieza de hover total
+                fig_hijos.update_traces(hovertemplate="<b>%{y}</b><br>Hijos: %{fullData.name}<br>Personas: %{x}<extra></extra>")
+                fig_hijos.update_layout(xaxis_title="Cantidad de Empleados", yaxis_title="")
+                st.plotly_chart(fig_hijos, use_container_width=True)
+            else:
+                st.warning("Columna 'Hijos' no detectada.")
+
+        st.divider()
+
+        # FILA 3: SCATTER PLOT
+        st.subheader("Relación Antigüedad vs Sueldo")
+        if "Antigüedad" in df_selection.columns:
+            fig_scat = px.scatter(
+                df_selection, x="Antigüedad", y="Sueldo Mensual (bruto)", 
+                color="Area", size="Edad", hover_name="Nombre por apellido",
+                template="plotly_white",
+                labels={"Sueldo Mensual (bruto)": "Sueldo", "Area": "Área"}
+            )
+            fig_scat.update_traces(hovertemplate="<b>%{hovertext}</b><br>Sueldo: $%{y:,.2f}<br>Antigüedad: %{x} años<extra></extra>")
+            st.plotly_chart(fig_scat, use_container_width=True)
+
+        with st.expander("🔍 Ver Base de Datos Detallada"):
+            st.dataframe(df_selection, use_container_width=True)
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df_selection.to_excel(writer, index=False, sheet_name='Sheet1')
+            st.download_button(label="📥 Descargar Excel Filtrado", data=output.getvalue(), 
+                               file_name="reporte_rrhh.xlsx", mime="application/vnd.ms-excel")
+    else:
+        st.info("👋 Por favor, sube el archivo Excel en la barra lateral.")
+
+elif st.session_state["authentication_status"] is False:
+    st.error("Credenciales incorrectas")
